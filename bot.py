@@ -1,43 +1,78 @@
 import os
+import json
+import openai
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# Получаем токен из переменной окружения
-TOKEN = os.environ["BOT_TOKEN"]
+# === Настройки ===
+
+# Загрузка токенов из переменных окружения
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+openai.api_key = os.environ["OPENAI_API_KEY"]
+
+# Загрузка тем КТП из JSON-файла
+with open("ktp_8class.json", "r", encoding="utf-8") as file:
+    ktp_topics = json.load(file)
+
+# === Функция генерации объяснения темы через ChatGPT ===
+
+async def get_theory_from_ai(topic):
+    prompt = (
+        f"Ты — учитель информатики 8 класса. Объясни тему «{topic}» простыми словами, кратко и понятно, "
+        f"для школьника. Приведи пример, если нужно. Не упоминай, что ты ИИ."
+    )
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.6,
+        max_tokens=400
+    )
+    return response["choices"][0]["message"]["content"]
+
+# === Обработчики ===
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    message = (
         "👋 Привет! Я бот-помощник по информатике 8 класса.\n\n"
-        "Напиши:\n"
-        "👉 'новая тема' — изучим новую тему\n"
-        "👉 'повторение' — повторим пройденное\n"
-        "👉 'сор' — подготовка к СОР"
+        "📚 Я работаю строго по школьной программе (КТП).\n"
+        "Напиши тему урока, например:\n"
+        "👉 переменные\n👉 цикл for\n👉 анализ данных\n"
+        "или просто номер недели: 17, 21 и т.п."
     )
+    await update.message.reply_text(message)
 
-# Сообщения: текстовые команды
+# Обработка сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.lower()
+    user_text = update.message.text.strip().lower()
+    found = None
 
-    if "новая тема" in text:
-        await update.message.reply_text("📘 Давай изучим новую тему. Например: 'Циклы в Python'.")
-    elif "повторение" in text:
-        await update.message.reply_text("🔁 Повторим материал! Напиши, что именно повторить.")
-    elif "сор" in text:
-        await update.message.reply_text("📝 Подготовка к СОР. Укажи тему, и я помогу с заданиями.")
+    # Поиск по номеру недели
+    if user_text.isdigit() and user_text in ktp_topics:
+        found = ktp_topics[user_text]
+
+    # Поиск по названию темы
+    if not found:
+        for topic_id, topic in ktp_topics.items():
+            if user_text in topic.lower():
+                found = topic
+                break
+
+    if found:
+        await update.message.reply_text(f"📘 Тема: {found}\n\n⌛ Генерирую объяснение...")
+        explanation = await get_theory_from_ai(found)
+        await update.message.reply_text(f"📖 Вот объяснение:\n\n{explanation}")
     else:
-        await update.message.reply_text("❓ Я тебя не понял. Напиши 'новая тема', 'повторение' или 'сор'.")
+        await update.message.reply_text(
+            "❗Эта тема не входит в школьную программу (КТП).\n"
+            "Попробуй написать точнее или укажи номер недели от 1 до 34."
+        )
 
-# Настройка и запуск бота
-app = ApplicationBuilder().token(TOKEN).build()
+# === Запуск бота ===
+
+app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-print("✅ Бот запущен. Ожидаю сообщения...")
+print("✅ Бот по КТП 8 класса запущен")
 app.run_polling()
